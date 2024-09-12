@@ -12,7 +12,7 @@ Fork of: https://github.com/natowi/14-Bit-Circular-Coded-Target
 
 ## Changes
 Code was changed to generate sheets of A4 with different target configuration. 
-![alt text](example.JPG "Example")
+![Example](example.JPG "Example")
 
 ## Detection of Targets
 Detect and decode the Circular Coded Targets: https://github.com/poxiao2/CCTDecode
