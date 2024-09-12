@@ -4,112 +4,217 @@
 Generate printable PDF of circular coded photogrammetry targets described by
 (expired) patent DE19733466A1.
 
-Requires Inkscape and PDFtk.
-
 Matthew Petroff <https://mpetroff.net>, 2018
+Matthias Hardner, 2024
 
 This script is released into the public domain using the CC0 1.0 Public
 Domain Dedication: https://creativecommons.org/publicdomain/zero/1.0/
 '''
 
 import subprocess   # Used to run external commands
-import tempfile     # Used to create temporary directory
 import os.path      # Used to manipulate file paths
-import math         # Used for mathematical operations
 import numpy as np  # Used for mathematical operations
 
 import find_codes   # Custom module for generating binary codes
 
-UNIT = 'in'         # SVG unit 'in' or 'mm'
-WIDTH = 8.5         # Page width
-HEIGHT = 11         # Page height
-DOT_DIAMETER = 0.4  # Diameter of dot at center of target
-ROWS = 5            # Rows of targets per page
-COLUMNS = 4         # Columns of targets per page
-X_MARGIN = 0.65     # X-axis page margin for targets
-Y_MARGIN = 0.9      # Y-axis page margin for targets
-BACKGROUND_X_MARGIN = 0.25  # X-axis page margin for black background
-BACKGROUND_Y_MARGIN = 0.5   # Y-axis page margin for black background
+INKSCAPE_EXECUTABLE = 'C://Program Files//Inkscape//bin//inkscape'
 CODES = find_codes.generate_codes(14)   # Codes for targets
-FILENAME = 'targets.pdf'    # Name of output PDF file
 
-def add_target(x_center, y_center, dot_radius, code, code_num, first_segment):
-    '''
-    Returns SVG data for a given target.
-    '''
-    # Define a white circle at the center of the target
-    out = '<circle fill="#fff" cx="{}" cy="{}" r="{}"/>\n'.format(x_center, \
-        y_center, dot_radius)
-    # Define the lines forming the outer shape of the target
-    out += '<g stroke="#fff" stroke-width="{}" fill="none">\n'.format( \
-        dot_radius)
-    for i in range(14):
-        if (1 << (13-i)) & code:
-            x_start = np.cos(np.deg2rad(360 / 14 * i)) * dot_radius * 2.5
-            y_start = np.sin(np.deg2rad(360 / 14 * i)) * dot_radius * 2.5
-            x_end = np.cos(np.deg2rad(360 / 14 * (i + 1))) \
-                * dot_radius * 2.5 - x_start
-            y_end = np.sin(np.deg2rad(360 / 14 * (i + 1))) \
-                * dot_radius * 2.5 - y_start
-            x_start += x_center
-            y_start += y_center
-            # Define a line segment in the SVG path element
-            # The path element is used to define a shape as a series of lines, curves and arcs
-            # https://developer.mozilla.org/en-US/docs/Web/SVG/Tutorial/Paths
-            out += '<path fill="#fff" d="m{} {}a{} {} 0 0 1 {} {}"' \
-                ' {}/>\n'.format(x_start, y_start, dot_radius * 2.5, \
-                dot_radius * 2.5, x_end, y_end, \
-                'id="first"' if first_segment else '')
-            first_segment = False
-    out += '</g>\n'
-    out += '<text x="{}" y="{}" font-size="{}" alignment-base="bottom" ' \
-        'font-family="Source Sans Pro, sans-serif" fill="#fff">{}' \
-        '</text>'.format(x_center - dot_radius * 3, \
-        y_center + dot_radius * 3, dot_radius / 2, code_num + 1)
-    return out
+class SvgPage:
+    def __init__(self, width = 210, height = 298, unit = 'mm', margin = 5, background_margin = 5, background_color = '#fff'):
+        self.__width = width
+        self.__height = height
+        self.__unit = unit
+        self.__margin = margin
+        self.__background_margin = background_margin
+        self.__background_color = background_color
 
-# Generate SVG code for sheet of targets
-def create_sheet(n, pdf_filename):
-    '''
-    Constructs SVG file for sheet of targets and then uses Inkscape to combine
-    adjacent target segments into a single path and to export a PDF.
-    '''
-    svg = '<svg xmlns="http://www.w3.org/2000/svg" width="{w}{u}" ' \
-        'height="{h}{u}" version="1.1" viewBox="0 0 {w} {h}">\n'.format( \
-        w=WIDTH, h=HEIGHT, u=UNIT)
-    target_size = DOT_DIAMETER * 3
-    x_spacing = (WIDTH - X_MARGIN * 2 - target_size) / (COLUMNS - 1)
-    y_spacing = (HEIGHT - Y_MARGIN * 2 - target_size) / (ROWS - 1)
-    svg += '<rect x="{}" y="{}" width="{}" height="{}"/>'.format( \
-        BACKGROUND_X_MARGIN, BACKGROUND_Y_MARGIN, \
-        WIDTH - BACKGROUND_X_MARGIN * 2, HEIGHT - BACKGROUND_Y_MARGIN * 2)
-    for i in range(ROWS):
-        for j in range(COLUMNS):
-            num = n * COLUMNS * ROWS + i * COLUMNS + j
+        # Create svg page
+        self.__svg = '<svg xmlns="http://www.w3.org/2000/svg" width="{w}{u}" ' \
+                     'height="{h}{u}" version="1.1" viewBox="0 0 {w} {h}">\n'.format( \
+            w=self.__width, h=self.__height, u=self.__unit)
+
+        # Create background rect
+        self.__svg += '<rect x="{}" y="{}" width="{}" height="{}" fill="{}"/>'.format( \
+            self.__background_margin, self.__background_margin, \
+            self.__width - background_margin * 2, self.__height - self.__background_margin * 2, self.__background_color)
+
+    def get_width(self):
+        return self.__width
+
+    def get_height(self):
+        return self.__height
+
+    def get_margin(self):
+        return self.__margin
+
+    def add_circle(self, x, y, radius, color = "#000000"):
+        self.__svg += '<circle fill="{}" cx="{}" cy="{}" r="{}"/>\n'.format(color, x, y, radius)
+
+    def add_target(self, x, y, radius, code, code_num, first_segment, color = "#000000"):
+        # Define a white circle at the center of the target
+        self.add_circle(x, y, radius, color)
+        #out = '<circle fill="{}" cx="{}" cy="{}" r="{}"/>\n'.format(MARKER_COLOR, x_center,  y_center, dot_radius)
+
+        # Define the lines forming the outer shape of the target
+        self.__svg += '<g stroke="{}" stroke-width="{}" fill="none">\n'.format(color, radius)
+        for i in range(14):
+            if (1 << (13 - i)) & code:
+                x_start = np.cos(np.deg2rad(360 / 14 * i)) * radius * 2.5
+                y_start = np.sin(np.deg2rad(360 / 14 * i)) * radius * 2.5
+                x_end = np.cos(np.deg2rad(360 / 14 * (i + 1))) \
+                        * radius * 2.5 - x_start
+                y_end = np.sin(np.deg2rad(360 / 14 * (i + 1))) \
+                        * radius * 2.5 - y_start
+                x_start += x
+                y_start += y
+                # Define a line segment in the SVG path element
+                # The path element is used to define a shape as a series of lines, curves and arcs
+                # https://developer.mozilla.org/en-US/docs/Web/SVG/Tutorial/Paths
+                self.__svg += '<path d="m{} {}a{} {} 0 0 1 {} {}"' \
+                              ' {}/>\n'.format(x_start, y_start, radius * 2.5, \
+                                               radius * 2.5, x_end, y_end, \
+                                               'id="first"' if first_segment else '')
+                first_segment = False
+        self.__svg += '</g>\n'
+        self.__svg += '<text x="{}" y="{}" font-size="{}" alignment-base="bottom" ' \
+                      'font-family="Source Sans Pro, sans-serif" fill="{}">{}' \
+                      '</text>'.format(x - radius * 3, y + radius * 3, radius / 2, color, code_num + 1)
+
+    def savePDF(self, filename, path):
+        # Write SVG file
+        svg_temp = self.__svg + '</svg>'
+        svg_filename = os.path.join(path, 'sheet.svg')
+        with open(svg_filename, 'w') as out_file:
+            out_file.write(svg_temp)
+
+        # Use Inkscape to convert SVG to PDF
+        subprocess.run([INKSCAPE_EXECUTABLE, '-g', '--without-gui', '--select=first',
+                        '--actions', 'EditSelectSameObjectType',
+                        '--actions', 'StrokeToPath',
+                        '--actions', 'SelectionUnion',
+                        '--actions', 'FileSave',
+                        '--actions', 'FileQuit', svg_filename])
+        subprocess.run(
+            [INKSCAPE_EXECUTABLE, '--export-filename=' + filename, svg_filename])
+
+
+def create_sheet_grid(diameter, code_index, rows, cols,  filename, path):
+    # Create sheet
+    svg_page = SvgPage(margin=10)
+
+    width = svg_page.get_width()
+    height = svg_page.get_height()
+    margin = svg_page.get_margin()
+
+    target_size = diameter * 3
+    x_spacing = (width - margin * 2 - target_size) / (cols - 1)
+    y_spacing = (height - margin * 2 - target_size) / (rows - 1)
+
+    # Add coded markers
+    for i in range(rows):
+        for j in range(cols):
+            num = code_index + i * cols + j
             if num < len(CODES):
-                svg += add_target(X_MARGIN + target_size / 2 + j * x_spacing,
-                                  Y_MARGIN + target_size / 2 + i * y_spacing,
-                                  DOT_DIAMETER / 2, CODES[num], num,
-                                  i == 0 and j == 0)
-    svg += '</svg>'
-    # Write SVG file to temporary directory and use Inkscape to convert it to PDF
-    svg_filename = os.path.join(tmp_dir, 'sheet.svg')
-    with open(svg_filename, 'w') as out_file:
-        out_file.write(svg)
-    subprocess.run(['inkscape', '-g', '--without-gui' , '--select=first',
-                    '--actions', 'EditSelectSameObjectType',
-                    '--actions', 'StrokeToPath',
-                    '--actions', 'SelectionUnion',
-                    '--actions', 'FileSave',
-                    '--actions', 'FileQuit', svg_filename])
-    subprocess.run(['inkscape', '--export-filename=' + pdf_filename, svg_filename])
+                svg_page.add_target(margin + target_size / 2 + j * x_spacing,
+                                    margin + target_size / 2 + i * y_spacing,
+                                    diameter / 2, CODES[num], num, True)
 
-with tempfile.TemporaryDirectory() as tmp_dir:
+    # save pdf
+    svg_page.savePDF(filename, path)
+
+def create_sheet_dense(diameter, code_index, filename, path):
+    # Create sheet
+    svg_page = SvgPage()
+
+    width = svg_page.get_width()
+    height = svg_page.get_height()
+    margin = svg_page.get_margin()
+
+    target_size = diameter * 3
+    x_spacing = (width - margin * 2 - target_size)
+    y_spacing = (height - margin * 2 - target_size) / 3
+
+    # Add coded markers
+    svg_page.add_target(width/4 , height/4, diameter / 2, CODES[code_index], code_index, True)
+
+    svg_page.add_target(width/4*3, height/4*3, diameter / 2, CODES[code_index+1], code_index+1, False)
+
+    # Add uncoded markers in the corners
+    svg_page.add_circle(margin + target_size / 2 + 1 * x_spacing,
+                        margin + target_size / 2 + 0 * y_spacing,
+                        diameter / 2)
+
+    svg_page.add_circle(margin + target_size / 2 + 1 * x_spacing,
+                        margin + target_size / 2 + 1 * y_spacing,
+                        diameter / 2)
+
+    svg_page.add_circle(margin + target_size / 2 + 0 * x_spacing,
+                        margin + target_size / 2 + 2 * y_spacing,
+                        diameter / 2)
+
+    svg_page.add_circle(margin + target_size / 2 + 0 * x_spacing,
+                        margin + target_size / 2 + 3 * y_spacing,
+                        diameter / 2)
+
+    # save pdf
+    svg_page.savePDF(filename, path)
+
+def create_sheet_one_marker(diameter, code_index, filename, path):
+    # Create sheet
+    svg_page = SvgPage()
+
+    width = svg_page.get_width()
+    height = svg_page.get_height()
+    margin = svg_page.get_margin()
+
+    target_size = diameter * 3
+    x_spacing = (width - margin * 2 - target_size)
+    y_spacing = (height - margin * 2 - target_size) / 2
+
+    # Add coded markers
+    svg_page.add_target(width/2 , height/2, diameter / 2, CODES[code_index], code_index, True)
+
+    # Add uncoded markers in the corners
+    svg_page.add_circle(margin + target_size / 2 + 0 * x_spacing,
+                        margin + target_size / 2 + 0 * y_spacing,
+                        diameter / 2)
+
+    svg_page.add_circle(margin + target_size / 2 + 1 * x_spacing,
+                        margin + target_size / 2 + 0 * y_spacing,
+                        diameter / 2)
+
+    svg_page.add_circle(margin + target_size / 2 + 0 * x_spacing,
+                        margin + target_size / 2 + 2 * y_spacing,
+                        diameter / 2)
+
+    svg_page.add_circle(margin + target_size / 2 + 1 * x_spacing,
+                        margin + target_size / 2 + 2 * y_spacing,
+                        diameter / 2)
+
+    # save pdf
+    svg_page.savePDF(filename, path)
+
+
+def main():
     # Create sheets of targets in temporary directory
-    pdfs = []
-    for n in range(math.ceil(len(CODES) / ROWS / COLUMNS)):
-        pdf_filename = os.path.join(tmp_dir, str(n) + '.pdf')
-        create_sheet(n, pdf_filename)
-        pdfs.append(pdf_filename)
-    # Combine sheets into a single PDF
-    subprocess.run(['pdftk'] + pdfs + ['cat', 'output', FILENAME])
+    dir = ""
+
+    # Create a sheet with two coded markers
+    for n in range(0,4,2):
+        pdf_filename = os.path.join(dir, str(n) + '.pdf')
+        create_sheet_dense(25, n, pdf_filename ,dir )
+
+    # Create a sheet with on coded marker in the center
+    for n in range(4, 6):
+        pdf_filename = os.path.join(dir, str(n) + '.pdf')
+        create_sheet_one_marker(25, n, pdf_filename, dir)
+
+    # Create a grid of coded markers
+    for n in range(6, 18, 6):
+        pdf_filename = os.path.join(dir, str(n) + '.pdf')
+        create_sheet_grid(25, n, 3, 2, pdf_filename, dir)
+
+
+if __name__ == "__main__":
+    main()
